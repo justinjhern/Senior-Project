@@ -1,7 +1,10 @@
 #ifndef NODE_H
 #define NODE_H
 
+#include <jsoncpp/json/json.h>
+
 #include <filesystem>
+#include <map>
 #include <string>
 #include <zmq.hpp>
 
@@ -12,10 +15,16 @@ class Node {
   // Construcotr, root dir to create the file system, target nodes <ip, port>
   Node(const std::filesystem::path& rootDir,
        const std::vector<std::pair<std::string, int>>& initialTargetNodes,
-       int port);
+       std::string ipAddress, int port);
   ~Node();
 
-  enum class FileOperation { READ, WRITE, DELETE, LIST };
+  /* todo Add write functionality
+  * SEND: Sends a copy file. Could be written or for reading
+  * DELETE: Removes file
+  * LIST: Sends the {filename, metadata} vector
+  * CREATE: Creates a file
+  */
+  enum class FileOperation { SEND, DELETE, LIST, CREATE };
 
   // Function to initialize zmq sockets
   void initialize();
@@ -24,7 +33,7 @@ class Node {
   void handleRequests();
 
   // Function to send file request messages to other nodes
-  void sendRequest(const std::string& targetIp, FileOperation operation,
+  void sendRequest(FileOperation operation,
                    const std::string& fileName = "No File Name");
 
   // Function to set target nodes
@@ -36,7 +45,8 @@ class Node {
 
   std::filesystem::path rootDir_;
 
-  // todo remove port 2
+  std::string ipAddress_;
+
   int port_;
 
   // zmq context
@@ -47,6 +57,8 @@ class Node {
   zmq::socket_t serverSocket_;
 
   std::vector<std::pair<std::string, int>> targetNodes_;
+
+  std::map<std::string, NodeFileSystem::fileMetadata> myFileMdata, otherFileMData;
 };
 
 #endif  // NODE_H
