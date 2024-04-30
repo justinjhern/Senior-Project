@@ -14,7 +14,7 @@ const size_t CHUNK_SIZE = 1024;  // 1 kb
 
 Node::Node(const std::filesystem::path& rootDir,
            const std::vector<std::pair<std::string, int>>& initialTargetNodes,
-           std::string ipAddress, int port)
+           const std::string ipAddress, int port)
     : rootDir_(rootDir),
       targetNodes_(initialTargetNodes),
       fileSystem_(NodeFileSystem(rootDir)),
@@ -24,10 +24,10 @@ Node::Node(const std::filesystem::path& rootDir,
   for (auto& [filename, metadata] : myFileMdata) {
     metadata.storedIpAddress = ipAddress_;
   }
+  Node::initialize();
 }
 
 Node::~Node() {
-  context_.close();
   clientSocket_.close();
   serverSocket_.close();
 }
@@ -37,12 +37,11 @@ void Node::initialize() {
   std::cout << "Initializing Node to bind to tcp://localhost:" << port_ << "."
             << std::endl;
   context_ = zmq::context_t(1);
-
-  serverSocket_ = zmq::socket_t(context_, ZMQ_ROUTER);
+  serverSocket_ = zmq::socket_t(context_, zmq::socket_type::router);
   // todo
   // replace with {public ip}:{port}
   serverSocket_.bind("tcp://*:" + std::to_string(port_));
-  clientSocket_ = zmq::socket_t(context_, ZMQ_DEALER);
+  clientSocket_ = zmq::socket_t(context_, zmq::socket_type::dealer);
 
   for (const auto& target : targetNodes_) {
     std::string targetIp = target.first;
@@ -64,47 +63,44 @@ void Node::initialize() {
  */
 void Node::handleRequests() {
   std::cout << " Beginning loops " << std::endl;
-
-  zmq::pollitem_t items[] = {{serverSocket_, 0, ZMQ_POLLIN, 0}};
+  // zmq::pollitem_t items[] = {{serverSocket_, 0, ZMQ_POLLIN, 0}};
   while (true) {
-    int more;
-    size_t more_size = sizeof(more);
-    // message is {id of socket? (very likely), operation, filename}
-    std::vector<zmq_msg_t> messages;
-    do {
-      /* Create an empty 0MQ message to hold the message part */
-      zmq_msg_t part;
-      int rc = zmq_msg_init(&part);
-      assert(rc == 0);
-      /* Block until a message is available to be received from socket */
-      rc = zmq_msg_recv(&part, serverSocket_, 0);
-      assert(rc != -1);
+    std::vector<zmq::message_t> recv_msgs;
 
-      // Add the string to the vector
-      messages.push_back(part);
+    const auto ret =
+        zmq::recv_multipart(serverSocket_, std::back_inserter(recv_msgs));
+    if (!ret) std::cout << "Error accepting message (Handler)" << std::endl;
+    std::cout << "Got " << *ret << " messages" << std::endl;
 
-      /* Determine if more message parts are to follow */
-      rc = zmq_getsockopt(serverSocket_, ZMQ_RCVMORE, &more, &more_size);
-      assert(rc == 0);
-      zmq_msg_close(&part);
-    } while (more);
-
-    // messageStr[0] will always be the reply tag, operation then filename
     std::vector<std::string> messagesStr;
 
-    for (zmq_msg_t msg : messages) {
-      std::string messageStr(static_cast<char*>(zmq_msg_data(&msg)),
-                             zmq_msg_size(&msg));
-      messagesStr.push_back(messageStr);
+    for (zmq::message_t& msg : recv_msgs) {
+      messagesStr.push_back(msg.to_string());
     }
 
     for (std::string messageString : messagesStr) {
       std::cout << " Recieved (Handler): " << messageString << std::endl;
     }
 
-    // set reply message
+    // return flag
+    zmq::message_t replyMsg(recv_msgs[0].data(), recv_msgs[0].size());
+    auto res = serverSocket_.send(replyMsg, zmq::send_flags::sndmore);
+
+    // const int msglength = msg.length();
+
+    // zmq::message_t msg(operationStr.c_str(), operationLength);
+
+    // std::cout << "Sending " << msg.to_string() << std::endl'
+
+    // auto res = serverSocket_.send(operationMessage,
+    // zmq::send_flags::sndmore);
+
+    // std::string replyStr = "I AM REPLYING HI HI!";
+    // zmq::message_t msg(replyStr.c_str(), replyStr.length());
+    //  res = serverSocket_.send(msg, zmq::send_flags::none);
+
+    // // set reply message
     if (messagesStr[1] == "SEND") {
-      int rc = zmq_msg_send(&messages[0], serverSocket_, ZMQ_SNDMORE);
       std::string filename = messagesStr[2];
       if (std::filesystem::exists(rootDir_ / filename)) {
         std::ifstream file(rootDir_ / filename, std::ios::binary);
@@ -118,44 +114,30 @@ void Node::handleRequests() {
         while (true) {
           file.read(buffer, CHUNK_SIZE);
           std::streamsize bytes_read = file.gcount();
-          zmq_msg_t replyMsg;
           if (!file.eof()) {
             // Send chunk (not the last one)
-            int rc = zmq_msg_init_size(&replyMsg, bytes_read);
-            assert(rc == 0);
-            memcpy(zmq_msg_data(&replyMsg), buffer, bytes_read);
-            rc = zmq_msg_send(&replyMsg, serverSocket_, ZMQ_SNDMORE);
-            assert(rc != -1);
+            std::cout << "Sending Bytes: " << bytes_read << std::endl;
+            zmq::message_t msg(buffer, bytes_read);
+            auto res = serverSocket_.send(msg, zmq::send_flags::sndmore);
           } else {
             // Last chunk - send without ZMQ_SNDMORE flag
-            int rc = zmq_msg_init_size(&replyMsg, bytes_read);
-            assert(rc == 0);
-            memcpy(zmq_msg_data(&replyMsg), buffer, bytes_read);
-            rc = zmq_msg_send(&replyMsg, serverSocket_, 0);
-            assert(rc != -1);
-            zmq_msg_close(&replyMsg);
+            std::cout << "Sending Last Byte: " << bytes_read << std::endl;
+            zmq::message_t msg(buffer, bytes_read);
+            auto res = serverSocket_.send(msg, zmq::send_flags::none);
             break;
           }
-          zmq_msg_close(&replyMsg);
         }
         file.close();
-
         std::cout << "Done sending: " << filename << std::endl;
       } else {  // if file was not found
         zmq_msg_t replyMsg;
         std::string endFileStr = "FILE WAS NOT FOUND.";
 
-        char endFileCStr[endFileStr.length() + 1];
-        strcpy(endFileCStr, endFileStr.c_str());
-
-        rc = zmq_msg_init_size(&replyMsg, endFileStr.length());
-        memcpy(zmq_msg_data(&replyMsg), endFileCStr, endFileStr.length());
-        rc = zmq_msg_send(&replyMsg, serverSocket_, 0);
-        zmq_msg_close(&replyMsg);
+        zmq::message_t msg(endFileStr.c_str(), endFileStr.length());
+        auto res = serverSocket_.send(msg, zmq::send_flags::none);
       }
-    } else if (messagesStr[1] == "DELETE") {
-      int rc = zmq_msg_send(&messages[0], serverSocket_, ZMQ_SNDMORE);
-      zmq_msg_t replyMsg;
+    }
+    if (messagesStr[1] == "DELETE") {
       std::string reply;
 
       std::string deletedFile = fileSystem_.deleteFile(messagesStr[2]);
@@ -164,16 +146,14 @@ void Node::handleRequests() {
       } else {
         reply = "Failed to delete file: " + messagesStr[2];
       }
-      char replyCStr[reply.length() + 1];
-      strcpy(replyCStr, reply.c_str());
 
-      rc = zmq_msg_init_size(&replyMsg, reply.length());
-      assert(rc == 0);
-      memcpy(zmq_msg_data(&replyMsg), replyCStr, reply.length());
-      rc = zmq_msg_send(&replyMsg, serverSocket_, 0);
-      zmq_msg_close(&replyMsg);
+      zmq::message_t msg(reply.c_str(), reply.length());
 
-    } else if (messagesStr[1] == "LIST") {
+      std::cout << "Sending " << msg.to_string() << std::endl;
+
+      auto res = serverSocket_.send(msg, zmq::send_flags::none);
+    }
+    if (messagesStr[1] == "LIST") {
       Json::Value jsonMap(Json::objectValue);
       for (const auto& [filename, metadata] : myFileMdata) {
         Json::Value metadataJson(Json::objectValue);
@@ -190,40 +170,23 @@ void Node::handleRequests() {
       Json::StreamWriterBuilder builder;
       std::string jsonString = Json::writeString(builder, jsonMap);
 
-      std::cout << "JSON String: " << jsonString << std::endl;
+      // send jsonstring
+      zmq::message_t msg(jsonString.c_str(), jsonString.length());
 
-      int rc = zmq_msg_send(&messages[0], serverSocket_, ZMQ_SNDMORE);
+      std::cout << "Sending " << msg.to_string() << std::endl;
 
-      zmq_msg_t replyMsg;
-
-      char jsonCStr[jsonString.length() + 1];
-      strcpy(jsonCStr, jsonString.c_str());
-
-      rc = zmq_msg_init_size(&replyMsg, jsonString.length());
-      assert(rc == 0);
-
-      memcpy(zmq_msg_data(&replyMsg), jsonCStr, jsonString.length());
-
-      rc = zmq_msg_send(&replyMsg, serverSocket_, 0);
-      zmq_msg_close(&replyMsg);
-
-    } else if (messagesStr[1] == "CREATE") {
+      auto res = serverSocket_.send(msg, zmq::send_flags::none);
+    }
+    if (messagesStr[1] == "CREATE") {
       fileSystem_.createFile(messagesStr[2]);
-      int rc = zmq_msg_send(&messages[0], serverSocket_, ZMQ_SNDMORE);
-      zmq_msg_t replyMsg;
 
       std::string reply = "Created file: " + messagesStr[2];
-      char replyCStr[reply.length() + 1];
-      strcpy(replyCStr, reply.c_str());
 
-      rc = zmq_msg_init_size(&replyMsg, reply.length());
-      assert(rc == 0);
-      rc = zmq_msg_send(&replyMsg, serverSocket_, 0);
-      zmq_msg_close(&replyMsg);
-    }
+      zmq::message_t msg(reply.c_str(), reply.length());
 
-    for (zmq_msg_t msg : messages) {
-      zmq_msg_close(&msg);
+      std::cout << "Sending " << msg.to_string() << std::endl;
+
+      auto res = serverSocket_.send(msg, zmq::send_flags::none);
     }
   }
 }
@@ -232,7 +195,6 @@ void Node::handleRequests() {
 void Node::sendRequest(FileOperation operation, const std::string& fileName) {
   for (auto node : targetNodes_) {
     std::string operationStr;
-    zmq_msg_t operationMessage, fileNameMessage;
 
     switch (operation) {
       case FileOperation::LIST:
@@ -255,62 +217,36 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     const int fileNameLength = fileName.length(),
               operationLength = operationStr.length();
 
-    int rc = zmq_msg_init_size(&operationMessage, operationLength);
-    assert(rc == 0);
-    rc = zmq_msg_init_size(&fileNameMessage, fileNameLength);
-    assert(rc == 0);
+    zmq::message_t operationMessage(operationStr.c_str(), operationLength),
+        fileNameMessage(fileName.c_str(), fileNameLength);
 
-    char operationCStr[operationLength + 1];
-    strcpy(operationCStr, operationStr.c_str());
+    std::cout << "Sending " << operationMessage.to_string() << " "
+              << fileNameMessage.to_string() << std::endl;
 
-    char fileNameCStr[fileNameLength + 1];
-    strcpy(fileNameCStr, fileName.c_str());
-
-    memcpy(zmq_msg_data(&operationMessage), operationCStr, operationLength);
-    memcpy(zmq_msg_data(&fileNameMessage), fileNameCStr, fileNameLength);
-
-    std::cout << "Sending " << operationCStr << " " << fileNameCStr
-              << std::endl;
-    rc = zmq_msg_send(&operationMessage, clientSocket_, ZMQ_SNDMORE);
-    assert(rc == strlen(operationCStr));
-
-    zmq_msg_close(&operationMessage);
-
-    rc = zmq_msg_send(&fileNameMessage, clientSocket_, 0);
-    assert(rc == strlen(fileNameCStr));
-
-    zmq_msg_close(&fileNameMessage);
+    auto res = clientSocket_.send(operationMessage, zmq::send_flags::sndmore);
+    res = clientSocket_.send(fileNameMessage, zmq::send_flags::none);
 
     // get reply
+    std::vector<zmq::message_t> recv_msgs;
 
-    int more;
-    size_t more_size = sizeof(more);
-    std::vector<zmq_msg_t> messages;
-    int counter = 0;
-    do {
-      zmq_msg_t part;
-      rc = zmq_msg_init(&part);
-      rc = zmq_msg_init_size(&part, CHUNK_SIZE);
-      /* Block until a message is available to be received from socket */
-      rc = zmq_msg_recv(&part, clientSocket_, 0);
-      assert(rc != -1);
+    const auto ret =
+        zmq::recv_multipart(clientSocket_, std::back_inserter(recv_msgs));
+    if (!ret) std::cout << "Error accepting message (Sender)" << std::endl;
+    std::cout << "Got " << *ret << " messages" << std::endl;
 
-      // Add the string to the vector
-      messages.push_back(part);
-      /* Determine if more message parts are to follow */
-      rc = zmq_getsockopt(clientSocket_, ZMQ_RCVMORE, &more, &more_size);
-      assert(rc == 0);
-      std::cout << "part size: " << zmq_msg_size(&part) << std::endl;
-      zmq_msg_close(&part);
-    } while (more);
+    std::vector<std::string> messagesStr;
 
-    for (zmq_msg_t msg : messages) {
-      std::cout << "message size: " << zmq_msg_size(&msg) << std::endl;
+    for (zmq::message_t& msg : recv_msgs) {
+      messagesStr.push_back(msg.to_string());
     }
+
+    // for (std::string messageString : messagesStr) {
+    //   std::cout << " Recieved (Sender): " << messageString << std::endl;
+    // }
     if (operationStr == "LIST") {
       // convert string to json then json to vector
-      std::string received_data(static_cast<char*>(zmq_msg_data(&messages[0])),
-                                zmq_msg_size(&messages[0]));
+      std::string received_data(static_cast<char*>(recv_msgs[0].data()),
+                                recv_msgs[0].size());
       Json::CharReaderBuilder builder;
       Json::Value jsonMap;
       std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
@@ -320,59 +256,53 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
                          &errors)) {
         std::cerr << "Failed to parse JSON: " << errors << std::endl;
         // todo error handling
-        std::map<std::string, NodeFileSystem::fileMetadata> fileMdata;
-        for (const auto& key : jsonMap.getMemberNames()) {
-          fileMdata[key] = NodeFileSystem::fileMetadata::fromJson(jsonMap[key]);
-        }
-        // insert into other map
-        // todo check for collisions
-        otherFileMData.insert(fileMdata.begin(), fileMdata.end());
       }
+      std::map<std::string, NodeFileSystem::fileMetadata> fileMdata;
+      for (const auto& key : jsonMap.getMemberNames()) {
+        fileMdata[key] = NodeFileSystem::fileMetadata::fromJson(jsonMap[key]);
+      }
+      // insert into other map
+      // todo check for collisions
+      otherFileMData.insert(fileMdata.begin(), fileMdata.end());
+
+      // std::string outputString;
+      // for (const auto& [filename, metadata] : otherFileMData) {
+      //   // Format the output string for each entry
+      //   outputString += "Filename: " + filename + "\n";
+      //   outputString +=
+      //       "  Stored IP Address: " + metadata.storedIpAddress + "\n";
+      //   outputString +=
+      //       "  File Size: " + std::to_string(metadata.fileSize) + "bytes\n";
+      //   outputString += "  Last Modified: " + metadata.lastModified + "\n\n";
+      // }
+
+      // // Print the accumulated output string
+      // std::cout << "output string is \n" << outputString << std::endl;
     }
-    if (operationStr == "DELETE") {
-    }
+
+    //   if (operationStr == "DELETE") {
+    //   }
     if (operationStr == "SEND") {
       // Open file to write
       // todo change for testing
-      std::ofstream file("testrecieved.txt", std::ios::binary);
+      std::ofstream file("testrecieved.bmp", std::ios::binary);
       if (!file.is_open()) {
         std::cerr << "Failed to open file for writing.\n";
         // todo error handling
       }
-      char buffer[CHUNK_SIZE * 2];  // 2 kb of data for buffer
       int count = 0;
-      std::cout << "Size of vector: " << messages.size() << std::endl;
-      for (zmq_msg_t msg : messages) {
-        std::cout << "Iteration: " << count << std::endl;
-        size_t message_size = zmq_msg_size(&msg);
+      for (zmq::message_t& msg : recv_msgs) {
         // Access message data directly
-        if (message_size > CHUNK_SIZE * 2) {
-          std::cerr
-              << "Error: Message size exceeds buffer capacity. Message size: "
-              << message_size << "Buffer size: " << CHUNK_SIZE * 2 << std::endl;
-          continue;
-        }
+        const char* msgData = static_cast<const char*>(msg.data());
 
-        memcpy(buffer, zmq_msg_data(&msg), message_size);
-        file.write(buffer, message_size);
-        memset(buffer, 0, CHUNK_SIZE * 2);
+        file.write(msgData, msg.size());
         count++;
       }
+      std::cout << "Got here 5" << std::endl;
       file.close();
+      std::cout << "Got here 6" << std::endl;
     }
     if (operationStr == "CREATE") {
     }
-    std::vector<std::string> messagesStr;
-    // Convert message to string
-    for (zmq_msg_t msg : messages) {
-      // std::string messageStr(static_cast<char*>(zmq_msg_data(&msg)),
-      //                        zmq_msg_size(&msg));
-      // messagesStr.push_back(messageStr);
-      zmq_msg_close(&msg);
-    }
-
-    // for (std::string msg : messagesStr) {
-    //   std::cout << " Recieved (sender): " << msg << std::endl;
-    // }
   }
 }

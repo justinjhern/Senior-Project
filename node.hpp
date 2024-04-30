@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 #include "node_filesystem.hpp"
 
@@ -15,7 +16,7 @@ class Node {
   // Construcotr, root dir to create the file system, target nodes <ip, port>
   Node(const std::filesystem::path& rootDir,
        const std::vector<std::pair<std::string, int>>& initialTargetNodes,
-       std::string ipAddress, int port);
+       const std::string ipAddress, int port);
   ~Node();
 
   /* todo Add write functionality
@@ -48,8 +49,7 @@ class Node {
   std::string ipAddress_;
 
   int port_;
-
-  // zmq context
+  // context
   zmq::context_t context_;
   // Accepts requests for file, returning file conent
   zmq::socket_t clientSocket_;

@@ -28,7 +28,6 @@ int main() {
   // Create a Node instance with an empty target node list (no other nodes)
   // Node node(rootDir, {{"localhost", targetPort1}, {"localhost", targetPort2}}, bindedPort);
   Node node(rootDir, {{"localhost", targetPort1}},"localhost" ,bindedPort);
-  node.initialize();
 
   std::thread handleThread(&Node::handleRequests, &node);
 
@@ -39,7 +38,7 @@ int main() {
     if (task == 0) {
       node.sendRequest(Node::FileOperation::LIST, fileName);
     } else if (task == 1) {
-      node.sendRequest(Node::FileOperation::SEND, "testing.txt");
+      node.sendRequest(Node::FileOperation::SEND, "testdraw.bmp");
     } else {
       node.sendRequest(Node::FileOperation::DELETE, fileName);
     }
