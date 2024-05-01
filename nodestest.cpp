@@ -6,8 +6,6 @@
 
 #include "node.hpp"
 
-// Assuming you have a Node class and related functions (see previous
-// discussions)
 class Node;
 
 int main() {

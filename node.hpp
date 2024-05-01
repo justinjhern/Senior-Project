@@ -41,6 +41,10 @@ class Node {
   void setTargetNodes(
       const std::vector<std::pair<std::string, int>>& newTargetNodes);
 
+  std::map<std::string, NodeFileSystem::fileMetadata> getMyFileData();
+
+  std::map<std::string, NodeFileSystem::fileMetadata> getOtherFileData();
+
  private:
   NodeFileSystem fileSystem_;
 

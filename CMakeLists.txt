@@ -32,12 +32,10 @@ message("LIBRARIES: ${jsoncpp_LIBRARIES}")
 
 # Include jsoncpp headers
 include_directories("${JSONCPP_INCLUDE_DIRS}")
-#add_executable(${PROJECT_NAME} main.cpp node_filesystem.cpp node.cpp)
 
 #TESTING
 add_executable(node_test_one nodestest.cpp node_filesystem.cpp node.cpp)
-#add_executable(server_test_one zmqtestone.cpp)
-#add_executable(server_test_two zmqtesttwo.cpp)
+add_executable(config_creator jsoncreator.cpp)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
@@ -47,6 +45,4 @@ include(CPack)
 
 #TESTING
 target_link_libraries(node_test_one ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
-#target_link_libraries(${PROJECT_NAME} torrent-rasterbar ${ZeroMQ_LIBRARY})
-#target_link_libraries(server_test_one ${ZeroMQ_LIBRARY} fmt::fmt)
-#target_link_libraries(server_test_two ${ZeroMQ_LIBRARY} fmt::fmt)
+target_link_libraries(config_creator ${JSONCPP_LIBRARIES})

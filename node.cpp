@@ -86,19 +86,6 @@ void Node::handleRequests() {
     zmq::message_t replyMsg(recv_msgs[0].data(), recv_msgs[0].size());
     auto res = serverSocket_.send(replyMsg, zmq::send_flags::sndmore);
 
-    // const int msglength = msg.length();
-
-    // zmq::message_t msg(operationStr.c_str(), operationLength);
-
-    // std::cout << "Sending " << msg.to_string() << std::endl'
-
-    // auto res = serverSocket_.send(operationMessage,
-    // zmq::send_flags::sndmore);
-
-    // std::string replyStr = "I AM REPLYING HI HI!";
-    // zmq::message_t msg(replyStr.c_str(), replyStr.length());
-    //  res = serverSocket_.send(msg, zmq::send_flags::none);
-
     // // set reply message
     if (messagesStr[1] == "SEND") {
       std::string filename = messagesStr[2];
@@ -264,20 +251,6 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
       // insert into other map
       // todo check for collisions
       otherFileMData.insert(fileMdata.begin(), fileMdata.end());
-
-      // std::string outputString;
-      // for (const auto& [filename, metadata] : otherFileMData) {
-      //   // Format the output string for each entry
-      //   outputString += "Filename: " + filename + "\n";
-      //   outputString +=
-      //       "  Stored IP Address: " + metadata.storedIpAddress + "\n";
-      //   outputString +=
-      //       "  File Size: " + std::to_string(metadata.fileSize) + "bytes\n";
-      //   outputString += "  Last Modified: " + metadata.lastModified + "\n\n";
-      // }
-
-      // // Print the accumulated output string
-      // std::cout << "output string is \n" << outputString << std::endl;
     }
 
     //   if (operationStr == "DELETE") {
@@ -306,3 +279,12 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     }
   }
 }
+
+
+  std::map<std::string, NodeFileSystem::fileMetadata> Node::getMyFileData(){
+    return myFileMdata;
+  }
+
+  std::map<std::string, NodeFileSystem::fileMetadata> Node::getOtherFileData(){
+    return otherFileMData;
+  }
