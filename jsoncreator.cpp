@@ -12,7 +12,7 @@ using namespace std;
 void setNodeIp(bool &nodeIpBool, std::pair<std::string, int> &nodeIp) {
   std::string ipAddress;
   int port;
-  std::cout << "Setting node IP and port: " <<std::endl;
+  std::cout << "Setting node IP and port: " << std::endl;
   std::cout << "Input IP address. Do not include port." << std::endl;
   std::cin >> ipAddress;
   std::cout << "Input port number. 31415 is recommended." << std::endl;
@@ -39,7 +39,8 @@ void addTargetNodes(bool &targetNodesBool,
   }
 }
 
-void deleteTargetNodes(bool &targetNodesBool, std::vector<std::pair<std::string, int>> &targetNodes) {
+void deleteTargetNodes(bool &targetNodesBool,
+                       std::vector<std::pair<std::string, int>> &targetNodes) {
   std::string ipAddress;
   std::cout << "Delete node from target nodes. " << std::endl;
   std::cout << "Input IP address to delete. Do not include port." << std::endl;
@@ -55,7 +56,7 @@ void deleteTargetNodes(bool &targetNodesBool, std::vector<std::pair<std::string,
     targetNodes.erase(it, targetNodes.end());
     std::cout << "Node(s) with IP address " << ipAddress << " removed."
               << std::endl;
-    if(targetNodes.empty()){
+    if (targetNodes.empty()) {
       targetNodesBool = false;
     }
   } else {
@@ -66,42 +67,50 @@ void deleteTargetNodes(bool &targetNodesBool, std::vector<std::pair<std::string,
 
 void setRootDir(bool &rootDirBool, std::string &rootDir) {
   std::string rootDirInput;
-  std::cout << "Input root directory. This will be the file where the filesystem is active" << std::endl;
+  std::cout << "Input root directory. This will be the file where the "
+               "filesystem is active"
+            << std::endl;
   std::cin >> rootDirInput;
   rootDirBool = true;
   rootDir = rootDirInput;
 }
 
-void writeConfigToFile(const std::pair<std::string, int> nodeIp,
-                       const std::vector<std::pair<std::string, int>> targetNodes,
-                       const std::string& rootDir) {
-    std::string jsonName = "CONFIG.json"; 
-    std::ofstream outfile(jsonName);
-    if (!outfile.is_open()) {
-        std::cerr << "Error: Could not open file: " << jsonName << std::endl;
-        return;
-    }
+void writeConfigToFile(
+    const std::pair<std::string, int> nodeIp,
+    const std::vector<std::pair<std::string, int>> targetNodes,
+    const std::string &rootDir) {
+  Json::Value root;
 
-    outfile << "{" << std::endl;
-    outfile << "  \"root_directory\": \"" << rootDir << "\"," << std::endl; 
-    outfile << "  \"node_ip\": \"" << nodeIp.first << "\"," << std::endl;
-    outfile << "  \"node_port\": " << nodeIp.second << "," << std::endl;
-    outfile << "  \"target_nodes\": [" << std::endl;
+  root["root_directory"] = rootDir;
 
-    bool firstTarget = true;
-    for (const auto& target : targetNodes) {
-        if (!firstTarget) {
-            outfile << "," << std::endl;
-        }
-        outfile << "    { \"ip\": \"" << target.first << "\", \"port\": " << target.second << " }";
-        firstTarget = false;
-    }
+  root["node_ip"] = nodeIp.first;
+  root["node_port"] = nodeIp.second;
 
-    outfile << std::endl << "  ]" << std::endl;
-    outfile << "}" << std::endl;
-    outfile.close();
+  Json::Value targetNodesArray(Json::arrayValue);
+  for (const auto &target : targetNodes) {
+    Json::Value targetNode;
+    targetNode["ip"] = target.first;
+    targetNode["port"] = target.second;
+    targetNodesArray.append(targetNode);
+  }
+  root["target_nodes"] = targetNodesArray;
 
-    std::cout << "Configuration saved successfully to: " << jsonName << std::endl;
+  std::string jsonName = "CONFIG.json";
+  std::ofstream outfile(jsonName);
+  if (!outfile.is_open()) {
+    std::cerr << "Error: Could not open file: " << jsonName << std::endl;
+    return;
+  }
+
+  Json::StreamWriterBuilder writerBuilder;
+  writerBuilder["commentStyle"] = "None";
+  writerBuilder["indentation"] = "  ";
+
+  std::unique_ptr<Json::StreamWriter> writer(writerBuilder.newStreamWriter());
+  writer->write(root, &outfile);
+
+  outfile.close();
+  std::cout << "Configuration saved successfully to: " << jsonName << std::endl;
 }
 
 int main() {
@@ -139,8 +148,7 @@ int main() {
       case 5:
         break;
       case 6:
-        if(rootDirBool && targetNodesBool && nodeIpBool)
-          runLoop = false;
+        if (rootDirBool && targetNodesBool && nodeIpBool) runLoop = false;
         break;
       default:
         break;

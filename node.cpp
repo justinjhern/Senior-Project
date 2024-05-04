@@ -2,6 +2,7 @@
 
 #include <fmt/core.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,6 +12,7 @@
 #include "node_filesystem.hpp"
 
 const size_t CHUNK_SIZE = 1024;  // 1 kb
+#define TIMEOUT_MS 3000          // 5000 ms (3 seconds)
 
 Node::Node(const std::filesystem::path& rootDir,
            const std::vector<std::pair<std::string, int>>& initialTargetNodes,
@@ -20,7 +22,7 @@ Node::Node(const std::filesystem::path& rootDir,
       fileSystem_(NodeFileSystem(rootDir)),
       ipAddress_(ipAddress),
       port_(port) {
-  myFileMdata = fileSystem_.getFileMetadata();
+  myFileMdata = fileSystem_.getFilesMetadata();
   for (auto& [filename, metadata] : myFileMdata) {
     metadata.storedIpAddress = ipAddress_;
   }
@@ -30,23 +32,23 @@ Node::Node(const std::filesystem::path& rootDir,
 Node::~Node() {
   clientSocket_.close();
   serverSocket_.close();
+  std::cout << "Goodbye! " << std::endl;
 }
 
 void Node::initialize() {
-  // todo change to fix ip address
-  std::cout << "Initializing Node to bind to tcp://localhost:" << port_ << "."
-            << std::endl;
-  context_ = zmq::context_t(1);
+  std::cout << "Initializing server to bind to tcp://"
+            << fmt::format("tcp://{}:{}.", ipAddress_, port_) << std::endl;
   serverSocket_ = zmq::socket_t(context_, zmq::socket_type::router);
-  // todo
-  // replace with {public ip}:{port}
-  serverSocket_.bind("tcp://*:" + std::to_string(port_));
-  clientSocket_ = zmq::socket_t(context_, zmq::socket_type::dealer);
+  serverSocket_.bind(fmt::format("tcp://{}:{}", ipAddress_, port_));
+  serverSocket_.set(zmq::sockopt::rcvtimeo, 500);
 
   for (const auto& target : targetNodes_) {
+    clientSocket_ = zmq::socket_t(context_, zmq::socket_type::dealer);
     std::string targetIp = target.first;
     int targetPort = target.second;
     // {public ip}:{port}
+    std::cout << "Connecting to: "
+              << fmt::format("tcp://{}:{}.", targetIp, targetPort) << std::endl;
     clientSocket_.connect(fmt::format("tcp://{}:{}", targetIp, targetPort));
   }
 }
@@ -61,15 +63,16 @@ void Node::initialize() {
  *   WROTE: Tells other servers a file has been edited and send a request for it
  *   WRITE: Sends the file content to replace written files
  */
-void Node::handleRequests() {
-  std::cout << " Beginning loops " << std::endl;
-  // zmq::pollitem_t items[] = {{serverSocket_, 0, ZMQ_POLLIN, 0}};
-  while (true) {
+void Node::handleRequests(std::atomic<bool>& runServer) {
+  while (runServer.load()) {
     std::vector<zmq::message_t> recv_msgs;
 
-    const auto ret =
+    auto ret =
         zmq::recv_multipart(serverSocket_, std::back_inserter(recv_msgs));
-    if (!ret) std::cout << "Error accepting message (Handler)" << std::endl;
+    if (!ret) {
+      // std::cout << "Error accepting message (Handler)" << std::endl;
+      continue;
+    }
     std::cout << "Got " << *ret << " messages" << std::endl;
 
     std::vector<std::string> messagesStr;
@@ -78,9 +81,9 @@ void Node::handleRequests() {
       messagesStr.push_back(msg.to_string());
     }
 
-    for (std::string messageString : messagesStr) {
-      std::cout << " Recieved (Handler): " << messageString << std::endl;
-    }
+    // for (std::string messageString : messagesStr) {
+    //   std::cout << " Recieved (Handler): " << messageString << std::endl;
+    // }
 
     // return flag
     zmq::message_t replyMsg(recv_msgs[0].data(), recv_msgs[0].size());
@@ -91,7 +94,7 @@ void Node::handleRequests() {
       std::string filename = messagesStr[2];
       if (std::filesystem::exists(rootDir_ / filename)) {
         std::ifstream file(rootDir_ / filename, std::ios::binary);
-        std::cout << "opening " << filename << std::endl;
+        // std::cout << "opening " << filename << std::endl;
         if (!file.is_open()) {
           std::cerr << "Error opening file: " << filename << std::endl;
           // todo error handling
@@ -103,19 +106,19 @@ void Node::handleRequests() {
           std::streamsize bytes_read = file.gcount();
           if (!file.eof()) {
             // Send chunk (not the last one)
-            std::cout << "Sending Bytes: " << bytes_read << std::endl;
+            // std::cout << "Sending Bytes: " << bytes_read << std::endl;
             zmq::message_t msg(buffer, bytes_read);
             auto res = serverSocket_.send(msg, zmq::send_flags::sndmore);
           } else {
             // Last chunk - send without ZMQ_SNDMORE flag
-            std::cout << "Sending Last Byte: " << bytes_read << std::endl;
+            // std::cout << "Sending Last Byte: " << bytes_read << std::endl;
             zmq::message_t msg(buffer, bytes_read);
             auto res = serverSocket_.send(msg, zmq::send_flags::none);
             break;
           }
         }
         file.close();
-        std::cout << "Done sending: " << filename << std::endl;
+        // std::cout << "Done sending: " << filename << std::endl;
       } else {  // if file was not found
         zmq_msg_t replyMsg;
         std::string endFileStr = "FILE WAS NOT FOUND.";
@@ -124,7 +127,8 @@ void Node::handleRequests() {
         auto res = serverSocket_.send(msg, zmq::send_flags::none);
       }
     }
-    if (messagesStr[1] == "DELETE") {
+    if (messagesStr[1] ==
+        "DELETE") {  // will not be used (permissions not implemented)
       std::string reply;
 
       std::string deletedFile = fileSystem_.deleteFile(messagesStr[2]);
@@ -136,7 +140,7 @@ void Node::handleRequests() {
 
       zmq::message_t msg(reply.c_str(), reply.length());
 
-      std::cout << "Sending " << msg.to_string() << std::endl;
+      // std::cout << "Sending " << msg.to_string() << std::endl;
 
       auto res = serverSocket_.send(msg, zmq::send_flags::none);
     }
@@ -160,18 +164,19 @@ void Node::handleRequests() {
       // send jsonstring
       zmq::message_t msg(jsonString.c_str(), jsonString.length());
 
-      std::cout << "Sending " << msg.to_string() << std::endl;
+      // std::cout << "Sending " << msg.to_string() << std::endl;
 
       auto res = serverSocket_.send(msg, zmq::send_flags::none);
     }
-    if (messagesStr[1] == "CREATE") {
+    if (messagesStr[1] ==
+        "CREATE") {  // will not be used permissions not implemented
       fileSystem_.createFile(messagesStr[2]);
 
       std::string reply = "Created file: " + messagesStr[2];
 
       zmq::message_t msg(reply.c_str(), reply.length());
 
-      std::cout << "Sending " << msg.to_string() << std::endl;
+      // std::cout << "Sending " << msg.to_string() << std::endl;
 
       auto res = serverSocket_.send(msg, zmq::send_flags::none);
     }
@@ -207,19 +212,33 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     zmq::message_t operationMessage(operationStr.c_str(), operationLength),
         fileNameMessage(fileName.c_str(), fileNameLength);
 
-    std::cout << "Sending " << operationMessage.to_string() << " "
-              << fileNameMessage.to_string() << std::endl;
+    // std::cout << "Sending " << operationMessage.to_string() << " "
+    //           << fileNameMessage.to_string() << std::endl;
 
     auto res = clientSocket_.send(operationMessage, zmq::send_flags::sndmore);
     res = clientSocket_.send(fileNameMessage, zmq::send_flags::none);
 
+    zmq_pollitem_t items[] = {{clientSocket_, 0, ZMQ_POLLIN, 0}};
+    int rc = zmq_poll(items, 1, std::chrono::milliseconds(TIMEOUT_MS).count());
+
+    if (rc == -1) {
+      // Error during polling
+      std::cerr << "Error during polling: " << zmq_strerror(zmq_errno())
+                << std::endl;
+      break;
+    } else if (rc == 0) {
+      // Timeout reached, no response from server
+      std::cerr << "Timeout waiting for " << node.first << ":" << node.second
+                << " server response. Continuing to next loop." << std::endl;
+      continue;  // Go to the next loop iteration
+    }
     // get reply
     std::vector<zmq::message_t> recv_msgs;
 
     const auto ret =
         zmq::recv_multipart(clientSocket_, std::back_inserter(recv_msgs));
     if (!ret) std::cout << "Error accepting message (Sender)" << std::endl;
-    std::cout << "Got " << *ret << " messages" << std::endl;
+    // std::cout << "Got " << *ret << " messages" << std::endl;
 
     std::vector<std::string> messagesStr;
 
@@ -257,34 +276,126 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     //   }
     if (operationStr == "SEND") {
       // Open file to write
-      // todo change for testing
-      std::ofstream file("testrecieved.bmp", std::ios::binary);
-      if (!file.is_open()) {
-        std::cerr << "Failed to open file for writing.\n";
-        // todo error handling
-      }
-      int count = 0;
-      for (zmq::message_t& msg : recv_msgs) {
-        // Access message data directly
-        const char* msgData = static_cast<const char*>(msg.data());
+      // If file wasnt found do nothing!
+      if (messagesStr[0] != "FILE WAS NOT FOUND.") {
+        std::string fileNameCopy = "copyof" + fileName;
+        std::ofstream file(rootDir_ / fileNameCopy, std::ios::binary);
+        if (!file.is_open()) {
+          std::cerr << "Failed to open file for writing.\n";
+          // todo error handling
+        }
+        int count = 0;
+        for (zmq::message_t& msg : recv_msgs) {
+          // Access message data directly
+          const char* msgData = static_cast<const char*>(msg.data());
 
-        file.write(msgData, msg.size());
-        count++;
+          file.write(msgData, msg.size());
+          count++;
+        }
+        file.close();
+        // std::cout << fileName << " was successfully recieved." << std::endl;
       }
-      std::cout << "Got here 5" << std::endl;
-      file.close();
-      std::cout << "Got here 6" << std::endl;
     }
     if (operationStr == "CREATE") {
     }
   }
 }
 
+std::map<std::string, NodeFileSystem::fileMetadata> Node::getMyFileData() {
+  return myFileMdata;
+}
 
-  std::map<std::string, NodeFileSystem::fileMetadata> Node::getMyFileData(){
-    return myFileMdata;
-  }
+std::map<std::string, NodeFileSystem::fileMetadata> Node::getOtherFileData() {
+  return otherFileMData;
+}
 
-  std::map<std::string, NodeFileSystem::fileMetadata> Node::getOtherFileData(){
-    return otherFileMData;
+void Node::addFileData() {}
+
+void Node::setFileData(
+    std::map<std::string, NodeFileSystem::fileMetadata> fileMData) {
+  myFileMdata = fileMData;
+}
+
+void Node::createFile(std::string fileName) {
+  if (myFileMdata.find(fileName) != myFileMdata.end()) {
+    std::cerr << fileName << " already exists. File was not created."
+              << std::endl;
+  } else {
+    NodeFileSystem::fileMetadata fileMetadata =
+        fileSystem_.createFile(fileName);
+    myFileMdata.insert({fileName, fileMetadata});
   }
+}
+
+void Node::deleteFile(std::string fileName) {
+  if (myFileMdata.find(fileName) == myFileMdata.end()) {
+    std::cerr << fileName << " already was not found. File was not deleted."
+              << std::endl;
+  } else {
+    fileSystem_.deleteFile(fileName);
+    auto it = myFileMdata.find(fileName);
+    myFileMdata.erase(it);
+  }
+}
+
+void Node::readFile(std::string fileName) {
+  if (!std::filesystem::exists(rootDir_ / fileName)) {
+    sendRequest(Node::FileOperation::SEND, fileName);
+  }
+  if (std::filesystem::exists(rootDir_ / fileName)) {
+    fileSystem_.readFile(fileName);
+  } else {
+    std::cerr << fileName
+              << " does not exist on this node or any other online node."
+              << std::endl;
+  }
+}
+
+template <typename T>
+void printElement(T t, const int& width) {
+  const char separator = ' ';
+  std::cout << std::left << std::setw(width) << std::setfill(separator) << t
+            << separator;
+}
+
+void printLine(std::string fileName, NodeFileSystem::fileMetadata metaData,
+               bool onNode) {
+  const int smallWidth = 10;
+  const int largeWidth = 20;
+  printElement(fileName, largeWidth);
+  if (onNode) {
+    printElement("Yes", 10);
+  } else {
+    printElement("No", 10);
+  }
+  printElement(metaData.storedIpAddress, largeWidth);
+  printElement(metaData.fileSize, smallWidth);
+  printElement(metaData.lastModified, largeWidth);
+}
+
+// Format:
+// Name | On Node | IP | File size | Last modified
+void Node::listFiles() {
+  otherFileMData.clear();
+  sendRequest(Node::FileOperation::LIST, "No File Name");
+
+  printElement("Name", 20);
+  printElement("On Node", 10);
+  printElement("Stored IP", 20);
+  printElement("Size (kb)", 10);
+  printElement("Last Modified", 20);
+  std::cout << std::endl;
+  for (auto [filename, metadata] : myFileMdata) {
+    printLine(filename, metadata, true);
+    std::cout << std::endl;
+  }
+  for (auto [filename, metadata] : otherFileMData) {
+    printLine(filename, metadata, false);
+    std::cout << std::endl;
+  }
+}
+
+void Node::refreshFileData() {
+  otherFileMData.clear();
+  sendRequest(Node::FileOperation::LIST, "");
+}

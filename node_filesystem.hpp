@@ -38,12 +38,14 @@ class NodeFileSystem {
     }
   };
 
-  void createFile(const std::string& fileName);
+  NodeFileSystem::fileMetadata createFile(const std::string& fileName);
   void readFile(const std::string& fileName);
   void getFile(const std::string& fileName);
   std::string deleteFile(const std::string& fileName);
   std::vector<std::string> listFiles();
-  std::map<std::string, NodeFileSystem::fileMetadata> getFileMetadata();
+  std::map<std::string, NodeFileSystem::fileMetadata> getFilesMetadata();
+  NodeFileSystem::fileMetadata getFileMetaData(std::string fileName);
+
 
  private:
   std::filesystem::path rootDir_;

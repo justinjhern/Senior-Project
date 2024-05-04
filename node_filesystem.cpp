@@ -56,8 +56,9 @@ NodeFileSystem::NodeFileSystem(const std::filesystem::path& rootDir)
   }
 }
 
-// Creates file from filename
-void NodeFileSystem::createFile(const std::string& fileName) {
+// Creates file from filename returns file metadata
+NodeFileSystem::fileMetadata NodeFileSystem::createFile(
+    const std::string& fileName) {
   std::ofstream file(rootDir_ / fileName);
   if (file.is_open()) {
     file.close();
@@ -67,8 +68,11 @@ void NodeFileSystem::createFile(const std::string& fileName) {
         fileTimeToISOString(last_write_time(rootDir_ / fileName));
     tempMd.fileSize = file_size(rootDir_ / fileName);
     fileMData[fileName] = tempMd;
+    return tempMd;
   } else {
     std::cerr << "Failed to create the file \"" << fileName << "\".\n";
+    NodeFileSystem::fileMetadata tempMd;
+    return tempMd;
   }
 }
 
@@ -109,6 +113,25 @@ std::vector<std::string> NodeFileSystem::listFiles() {
 }
 
 std::map<std::string, NodeFileSystem::fileMetadata>
-NodeFileSystem::getFileMetadata() {
+NodeFileSystem::getFilesMetadata() {
   return fileMData;
+}
+
+NodeFileSystem::fileMetadata NodeFileSystem::getFileMetaData(
+    std::string fileName) {
+  std::ifstream file(rootDir_ / fileName);
+  if (file.is_open()) {
+    file.close();
+    NodeFileSystem::fileMetadata tempMd;
+    tempMd.lastModified =
+        fileTimeToISOString(last_write_time(rootDir_ / fileName));
+    tempMd.fileSize = file_size(rootDir_ / fileName);
+    fileMData[fileName] = tempMd;
+    return tempMd;
+  } else {
+    std::cerr << "Failed to get file metadata of \"" << fileName << "\".\n";
+    // todo add proper error checking
+    NodeFileSystem::fileMetadata tempMd;
+    return tempMd;
+  }
 }
