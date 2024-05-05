@@ -50,10 +50,10 @@ NodeFileSystem::NodeFileSystem(const std::filesystem::path& rootDir)
     tempMap[entry.path().filename()] = tempMd;
   }
   fileMData = tempMap;
-  std::cout << "Printing files in filesystem" << std::endl;
-  for (auto it = fileMData.begin(); it != fileMData.end(); ++it) {
-    std::cout << it->first << std::endl;
-  }
+  // std::cout << "Printing files in filesystem" << std::endl;
+  // for (auto it = fileMData.begin(); it != fileMData.end(); ++it) {
+  //   std::cout << it->first << std::endl;
+  // }
 }
 
 // Creates file from filename returns file metadata
