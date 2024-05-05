@@ -37,8 +37,9 @@ add_executable(config_creator jsoncreator.cpp)
 add_executable(SDFSS main.cpp node_filesystem.cpp node.cpp )
 add_executable(testSDFSS1 maintest1.cpp node_filesystem.cpp node.cpp )
 add_executable(testSDFSS2 maintest2.cpp node_filesystem.cpp node.cpp )
+
 #TESTING
-#add_executable(node_test_one nodestest.cpp node_filesystem.cpp node.cpp)
+add_executable(node_test nodetest.cpp node_filesystem.cpp node.cpp)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION}) 
@@ -50,5 +51,5 @@ target_link_libraries(testSDFSS1 ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES}
 target_link_libraries(testSDFSS2 ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
 
 #TESTING
-#target_link_libraries(node_test_one ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
+target_link_libraries(node_test ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
 

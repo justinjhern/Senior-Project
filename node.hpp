@@ -12,6 +12,21 @@
 
 #include "node_filesystem.hpp"
 
+class SocketWrapper {
+public:
+    explicit SocketWrapper(zmq::socket_t* socket, std::string ip, int port);
+
+    ~SocketWrapper();
+
+    zmq::socket_t* getSocket() const;
+    
+    std::string getIp();
+
+private:
+    zmq::socket_t* socket_;
+    std::string ip_;
+};
+
 class Node {
  public:
   // Construcotr, root dir to create the file system, target nodes <ip, port>
@@ -76,7 +91,7 @@ class Node {
   // context
   zmq::context_t context_;
   // Accepts requests for file, returning file conent
-  zmq::socket_t clientSocket_;
+  std::vector<std::unique_ptr<SocketWrapper>> clientSockets_;
   // Requests file, accepts file content
   zmq::socket_t serverSocket_;
 
@@ -84,11 +99,6 @@ class Node {
 
   std::map<std::string, NodeFileSystem::fileMetadata> myFileMdata,
       otherFileMData;
-};
-
-class connect_monitor_t : public zmq::monitor_t {
- public:
-  void on_event_connected(const zmq_event_t& event, const char* addr) override;
 };
 
 #endif  // NODE_H

@@ -18,7 +18,6 @@ void runNodeRequestHandler(Node &node, std::atomic<bool> &serverRunning) {
   node.handleRequests(serverRunning);
 }
 
-
 std::vector<std::string> split_string(const std::string &str) {
   std::vector<std::string> words;
   std::istringstream iss(str);
@@ -119,14 +118,22 @@ int main(int argc, char *argv[]) {
 
   std::cout << "Input \"help\" for commands. " << std::endl;
 
-  for (std::string line;
-       std::cout << "SDFSS > " && std::getline(std::cin, line);) {
+  bool runCli = true;
+
+  while (runCli) {
+    std::string line;
+    std::cout << "> SDFSS ";
+    std::cin >> line;
     std::vector<std::string> input = split_string(line);
     std::vector<std::string> temp;
     for (std::string str : input) temp.push_back(cleanStr(str));
-    if (temp[0] == "exit") break;
-    if (!line.empty()) process(temp, node);
+    if (!line.empty() && temp[0] == "exit") {
+      runCli = false;
+    } else {
+      process(temp, node);
+    }
   }
+
   serverRunning = false;
   serverThread.join();
   std::cout << "see you later alligator!" << std::endl;

@@ -30,26 +30,30 @@ Node::Node(const std::filesystem::path& rootDir,
 }
 
 Node::~Node() {
-  clientSocket_.close();
   serverSocket_.close();
+  clientSockets_.clear();
   std::cout << "Goodbye! " << std::endl;
 }
 
 void Node::initialize() {
-  std::cout << "Initializing server to bind to tcp://"
+  std::cout << "Initializing server to bind to "
             << fmt::format("tcp://{}:{}.", ipAddress_, port_) << std::endl;
   serverSocket_ = zmq::socket_t(context_, zmq::socket_type::router);
   serverSocket_.bind(fmt::format("tcp://{}:{}", ipAddress_, port_));
   serverSocket_.set(zmq::sockopt::rcvtimeo, 500);
 
   for (const auto& target : targetNodes_) {
-    clientSocket_ = zmq::socket_t(context_, zmq::socket_type::dealer);
+    zmq::socket_t* clientSocket =
+        new zmq::socket_t(context_, zmq::socket_type::dealer);
     std::string targetIp = target.first;
     int targetPort = target.second;
     // {public ip}:{port}
     std::cout << "Connecting to: "
               << fmt::format("tcp://{}:{}.", targetIp, targetPort) << std::endl;
-    clientSocket_.connect(fmt::format("tcp://{}:{}", targetIp, targetPort));
+    clientSocket->connect(fmt::format("tcp://{}:{}", targetIp, targetPort));
+
+    clientSockets_.push_back(
+        std::make_unique<SocketWrapper>(clientSocket, targetIp, targetPort));
   }
 }
 
@@ -64,6 +68,7 @@ void Node::initialize() {
  *   WRITE: Sends the file content to replace written files
  */
 void Node::handleRequests(std::atomic<bool>& runServer) {
+  std::cout << "server up and running!" << std::endl;
   while (runServer.load()) {
     std::vector<zmq::message_t> recv_msgs;
 
@@ -73,7 +78,7 @@ void Node::handleRequests(std::atomic<bool>& runServer) {
       // std::cout << "Error accepting message (Handler)" << std::endl;
       continue;
     }
-    std::cout << "Got " << *ret << " messages" << std::endl;
+    // std::cout << "Got " << *ret << " messages" << std::endl;
 
     std::vector<std::string> messagesStr;
 
@@ -185,7 +190,7 @@ void Node::handleRequests(std::atomic<bool>& runServer) {
 
 // will send two messages, first with operation, second with file name
 void Node::sendRequest(FileOperation operation, const std::string& fileName) {
-  for (auto node : targetNodes_) {
+  for (const auto& wrapper : clientSockets_) {
     std::string operationStr;
 
     switch (operation) {
@@ -212,31 +217,32 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     zmq::message_t operationMessage(operationStr.c_str(), operationLength),
         fileNameMessage(fileName.c_str(), fileNameLength);
 
-    // std::cout << "Sending " << operationMessage.to_string() << " "
-    //           << fileNameMessage.to_string() << std::endl;
+    std::cout << "Sending " << operationMessage.to_string() << " "
+              << fileNameMessage.to_string() << std::endl;
 
-    auto res = clientSocket_.send(operationMessage, zmq::send_flags::sndmore);
-    res = clientSocket_.send(fileNameMessage, zmq::send_flags::none);
+    auto res =
+        wrapper->getSocket()->send(operationMessage, zmq::send_flags::sndmore);
+    res = wrapper->getSocket()->send(fileNameMessage, zmq::send_flags::none);
 
-    zmq_pollitem_t items[] = {{clientSocket_, 0, ZMQ_POLLIN, 0}};
+    zmq_pollitem_t items[] = {{*(wrapper->getSocket()), 0, ZMQ_POLLIN, 0}};
     int rc = zmq_poll(items, 1, std::chrono::milliseconds(TIMEOUT_MS).count());
 
     if (rc == -1) {
       // Error during polling
       std::cerr << "Error during polling: " << zmq_strerror(zmq_errno())
                 << std::endl;
-      break;
+      return;
     } else if (rc == 0) {
       // Timeout reached, no response from server
-      std::cerr << "Timeout waiting for " << node.first << ":" << node.second
-                << " server response. Continuing to next loop." << std::endl;
-      continue;  // Go to the next loop iteration
+      std::cerr << "Timeout waiting for" << wrapper->getIp()
+                << "'s response. Continuing to next loop." << std::endl;
+      return;
     }
     // get reply
     std::vector<zmq::message_t> recv_msgs;
 
-    const auto ret =
-        zmq::recv_multipart(clientSocket_, std::back_inserter(recv_msgs));
+    const auto ret = zmq::recv_multipart(*wrapper->getSocket(),
+                                         std::back_inserter(recv_msgs));
     if (!ret) std::cout << "Error accepting message (Sender)" << std::endl;
     // std::cout << "Got " << *ret << " messages" << std::endl;
 
@@ -399,3 +405,17 @@ void Node::refreshFileData() {
   otherFileMData.clear();
   sendRequest(Node::FileOperation::LIST, "");
 }
+
+SocketWrapper::SocketWrapper(zmq::socket_t* socket, std::string ip, int port)
+    : socket_(socket) {
+  ip_ = ip + ":" + std::to_string(port);
+}
+
+SocketWrapper::~SocketWrapper() {
+  socket_->close();
+  delete socket_;
+}
+
+zmq::socket_t* SocketWrapper::getSocket() const { return socket_; }
+
+std::string SocketWrapper::getIp() { return ip_; }
