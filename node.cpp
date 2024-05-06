@@ -12,7 +12,7 @@
 #include "node_filesystem.hpp"
 
 const size_t CHUNK_SIZE = 1024;  // 1 kb
-#define TIMEOUT_MS 3000          // 5000 ms (3 seconds)
+#define TIMEOUT_MS 3000          // 3000 ms (3 seconds)
 
 Node::Node(const std::filesystem::path& rootDir,
            const std::vector<std::pair<std::string, int>>& initialTargetNodes,
@@ -24,15 +24,18 @@ Node::Node(const std::filesystem::path& rootDir,
       port_(port) {
   myFileMdata = fileSystem_.getFilesMetadata();
   for (auto& [filename, metadata] : myFileMdata) {
-    metadata.storedIpAddress = ipAddress_;
+    metadata.storedIpAddress = ipAddress_ + ":" + std::to_string(port_);
   }
   Node::initialize();
 }
 
 Node::~Node() {
+  for (auto& wrapper : clientSockets_) {
+    wrapper->getSocket()->close();
+  }
   serverSocket_.close();
   clientSockets_.clear();
-  std::cout << "Goodbye! " << std::endl;
+  context_.close();
 }
 
 void Node::initialize() {
@@ -64,11 +67,10 @@ void Node::initialize() {
  *   DELETE: Removes file from filesystem
  *   LIST: Replies with JSON of the file and metadata map
  *   CREATE: Creates a file in a filesystem
- *   WROTE: Tells other servers a file has been edited and send a request for it
- *   WRITE: Sends the file content to replace written files
+ *   UPDATE: Sends a request to the origin node for an update
+ *   UPDATED: Sends a JSON of the file and metadata map
  */
 void Node::handleRequests(std::atomic<bool>& runServer) {
-  std::cout << "server up and running!" << std::endl;
   while (runServer.load()) {
     std::vector<zmq::message_t> recv_msgs;
 
@@ -153,12 +155,9 @@ void Node::handleRequests(std::atomic<bool>& runServer) {
       Json::Value jsonMap(Json::objectValue);
       for (const auto& [filename, metadata] : myFileMdata) {
         Json::Value metadataJson(Json::objectValue);
-        // Add each metadata field (owner, creationTime, size, etc.) to the
-        // metadataJson object
         metadataJson["fileSize"] = metadata.fileSize;
         metadataJson["lastModified"] = metadata.lastModified;
-        metadataJson["fileStoredIp"] = metadata.storedIpAddress;
-        // ... add other metadata fields ...
+        metadataJson["storedIpAddress"] = metadata.storedIpAddress;
 
         jsonMap[filename] = metadataJson;
       }
@@ -185,6 +184,30 @@ void Node::handleRequests(std::atomic<bool>& runServer) {
 
       auto res = serverSocket_.send(msg, zmq::send_flags::none);
     }
+    if (messagesStr[1] == "UPDATE") {
+      sendRequest(FileOperation::UPDATED);
+    }
+    if (messagesStr[1] == "UPDATED") {
+      Json::Value jsonMap(Json::objectValue);
+      for (const auto& [filename, metadata] : myFileMdata) {
+        Json::Value metadataJson(Json::objectValue);
+        metadataJson["fileSize"] = metadata.fileSize;
+        metadataJson["lastModified"] = metadata.lastModified;
+        metadataJson["storedIpAddress"] = metadata.storedIpAddress;
+
+        jsonMap[filename] = metadataJson;
+      }
+      // serialize JSON to string
+      Json::StreamWriterBuilder builder;
+      std::string jsonString = Json::writeString(builder, jsonMap);
+
+      // send jsonstring
+      zmq::message_t msg(jsonString.c_str(), jsonString.length());
+
+      // std::cout << "Sending " << msg.to_string() << std::endl;
+
+      auto res = serverSocket_.send(msg, zmq::send_flags::none);
+    }
   }
 }
 
@@ -206,6 +229,12 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
       case FileOperation::CREATE:
         operationStr = "CREATE";
         break;
+      case FileOperation::UPDATE:
+        operationStr = "UPDATE";
+        break;
+      case FileOperation::UPDATED:
+        operationStr = "UPDATED";
+        break;
       default:
         operationStr = "ERROR";
         break;
@@ -217,8 +246,8 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     zmq::message_t operationMessage(operationStr.c_str(), operationLength),
         fileNameMessage(fileName.c_str(), fileNameLength);
 
-    std::cout << "Sending " << operationMessage.to_string() << " "
-              << fileNameMessage.to_string() << std::endl;
+    // std::cout << "Sending " << operationMessage.to_string() << " "
+    //           << fileNameMessage.to_string() << std::endl;
 
     auto res =
         wrapper->getSocket()->send(operationMessage, zmq::send_flags::sndmore);
@@ -235,7 +264,7 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
     } else if (rc == 0) {
       // Timeout reached, no response from server
       std::cerr << "Timeout waiting for" << wrapper->getIp()
-                << "'s response. Continuing to next loop." << std::endl;
+                << "'s response. Proceeding." << std::endl;
       return;
     }
     // get reply
@@ -243,7 +272,7 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
 
     const auto ret = zmq::recv_multipart(*wrapper->getSocket(),
                                          std::back_inserter(recv_msgs));
-    if (!ret) std::cout << "Error accepting message (Sender)" << std::endl;
+    if (!ret) std::cerr << "Error accepting message (Sender)" << std::endl;
     // std::cout << "Got " << *ret << " messages" << std::endl;
 
     std::vector<std::string> messagesStr;
@@ -300,9 +329,35 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
         }
         file.close();
         // std::cout << fileName << " was successfully recieved." << std::endl;
+        NodeFileSystem::fileMetadata tempMd;
+        tempMd = fileSystem_.getFileMetaData("copyof" + fileName);
+        tempMd.storedIpAddress = wrapper->getIp();
+        myFileMdata["copyof" + fileName] = tempMd;
       }
     }
-    if (operationStr == "CREATE") {
+    if (operationStr == "UPDATED") {
+            // convert string to json then json to vector
+      std::string received_data(static_cast<char*>(recv_msgs[0].data()),
+                                recv_msgs[0].size());
+      Json::CharReaderBuilder builder;
+      Json::Value jsonMap;
+      std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+      std::string errors;
+      if (!reader->parse(received_data.c_str(),
+                         received_data.c_str() + received_data.size(), &jsonMap,
+                         &errors)) {
+        std::cerr << "Failed to parse JSON: " << errors << std::endl;
+        // todo error handling
+      }
+      std::map<std::string, NodeFileSystem::fileMetadata> fileMdata;
+      for (const auto& key : jsonMap.getMemberNames()) {
+        fileMdata[key] = NodeFileSystem::fileMetadata::fromJson(jsonMap[key]);
+      }
+      // insert into other map
+
+      for(auto entry : fileMdata){
+        otherFileMData[entry.first] = entry.second;
+      }
     }
   }
 }
@@ -329,13 +384,14 @@ void Node::createFile(std::string fileName) {
   } else {
     NodeFileSystem::fileMetadata fileMetadata =
         fileSystem_.createFile(fileName);
+    fileMetadata.storedIpAddress = ipAddress_ + ":" + std::to_string(port_);
     myFileMdata.insert({fileName, fileMetadata});
   }
 }
 
 void Node::deleteFile(std::string fileName) {
   if (myFileMdata.find(fileName) == myFileMdata.end()) {
-    std::cerr << fileName << " already was not found. File was not deleted."
+    std::cerr << fileName << " was not found. File was not deleted."
               << std::endl;
   } else {
     fileSystem_.deleteFile(fileName);
@@ -348,8 +404,9 @@ void Node::readFile(std::string fileName) {
   if (!std::filesystem::exists(rootDir_ / fileName)) {
     sendRequest(Node::FileOperation::SEND, fileName);
   }
-  if (std::filesystem::exists(rootDir_ / fileName)) {
-    fileSystem_.readFile(fileName);
+  std::string copyFileNameStr = "copyof" + fileName;
+  if (std::filesystem::exists(rootDir_ / copyFileNameStr)) {
+    fileSystem_.readFile(copyFileNameStr);
   } else {
     std::cerr << fileName
               << " does not exist on this node or any other online node."
@@ -401,9 +458,21 @@ void Node::listFiles() {
   }
 }
 
-void Node::refreshFileData() {
-  otherFileMData.clear();
-  sendRequest(Node::FileOperation::LIST, "");
+void Node::refresh() {
+  myFileMdata.clear();
+  for (const auto& entry : std::filesystem::directory_iterator(rootDir_)) {
+    NodeFileSystem::fileMetadata tempMd;
+    tempMd = fileSystem_.getFileMetaData(entry.path().filename());
+    myFileMdata[entry.path().filename()] = tempMd;
+  }
+  for (auto& [filename, metadata] : myFileMdata) {
+    metadata.storedIpAddress = ipAddress_ + ":" + std::to_string(port_);
+  }
+}
+
+void Node::update(){
+  refresh();
+  sendRequest(Node::FileOperation::UPDATE, "");
 }
 
 SocketWrapper::SocketWrapper(zmq::socket_t* socket, std::string ip, int port)
@@ -411,10 +480,7 @@ SocketWrapper::SocketWrapper(zmq::socket_t* socket, std::string ip, int port)
   ip_ = ip + ":" + std::to_string(port);
 }
 
-SocketWrapper::~SocketWrapper() {
-  socket_->close();
-  delete socket_;
-}
+SocketWrapper::~SocketWrapper() { delete socket_; }
 
 zmq::socket_t* SocketWrapper::getSocket() const { return socket_; }
 

@@ -148,7 +148,11 @@ int main() {
       case 5:
         break;
       case 6:
-        if (rootDirBool && targetNodesBool && nodeIpBool) runLoop = false;
+        if (rootDirBool && targetNodesBool && nodeIpBool) {
+          runLoop = false;
+        } else {
+          std::cout << "One of the necessary settings has not been set. Try again." << std::endl;
+        }
         break;
       default:
         break;

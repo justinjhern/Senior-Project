@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,10 @@
 #include "node.hpp"
 
 enum class command_list { INVALID, LIST, REFRESH, READ, CREATE, DELETE };
+
+void runNodeRequestHandler(Node &node, std::atomic<bool> &serverRunning) {
+  node.handleRequests(serverRunning);
+}
 
 std::vector<std::string> split_string(const std::string &str) {
   std::vector<std::string> words;
@@ -67,25 +72,24 @@ void printHelp() {
   1) read [filename]     | Prints contents of file, if the file is not on the user's node a copy will be downloaded.\n\
   2) create [filename]   | Creates a file on the user's node.\n\
   3) delete [filename]   | Deletes a file from the user's node.\n\
-  4) update [filename]   | Searches for node of origin for file, updating it if node of origin is found.\n\
-  5) list                | Updates files. Lists all files in the DFSS. Lists files on user's nodes first, followed by files on other active nodes.\n\
+  4) list                | Updates files. Lists all files in the DFSS. Lists files on user's nodes first, followed by files on other active nodes.\n\
+  5) refresh             | Refreshes file storage system.\n\
   6) exit                | Closes node, exits storage system."
             << std::endl;
 }
 
 void createFile(Node &node, std::string fileName) { node.createFile(fileName); }
 void deleteFile(Node &node, std::string fileName) { node.deleteFile(fileName); }
-void updateFile(Node &node) {}
+void readFile(Node &node, std::string fileName) { node.readFile(fileName); }
+void updateFile(Node &node) {node.update();}
 void listFiles(Node &node) { node.listFiles(); }
-void refresh(Node &node) {node.refreshFileData();}
+void refresh(Node &node) { node.refresh(); }
 
 void process(std::vector<std::string> input, Node &node) {
-  for(std::string entry : input){
-    std::cout << entry << std::endl;
-  }
   if (input[0] == "help") printHelp();
   if (input[0] == "create") createFile(node, input[1]);
   if (input[0] == "delete") deleteFile(node, input[1]);
+  if (input[0] == "read") readFile(node, input[1]);
   if (input[0] == "refresh") refresh(node);
   if (input[0] == "list") listFiles(node);
 }
@@ -106,18 +110,31 @@ int main(int argc, char *argv[]) {
 
   Node node(rootDir, targetNodes, nodeIp.first, nodeIp.second);
 
+  std::atomic<bool> serverRunning(true);
+
+  std::thread serverThread(runNodeRequestHandler, std::ref(node),
+                           std::ref(serverRunning));
+
   std::cout << "Input \"help\" for commands. " << std::endl;
 
-  for (std::string line;
-       std::cout << "SDFSS > " && std::getline(std::cin, line);) {
+  bool runCli = true;
+
+  while (runCli) {
+    std::string line;
+    std::cout << "> SDFSS ";
+    std::getline(std::cin, line);
     std::vector<std::string> input = split_string(line);
     std::vector<std::string> temp;
-    for(std::string str : input)
-      temp.push_back(cleanStr(str));
-    if (temp[0] == "exit") break;
-    if (!line.empty()) process(temp, node);
+    for (std::string str : input) temp.push_back(cleanStr(str));
+    if (!line.empty() && temp[0] == "exit") {
+      runCli = false;
+    } else {
+      process(temp, node);
+    }
   }
 
-  std::cout << "see you later alligator!" << std::endl;
+  serverRunning = false;
+  serverThread.join();
+  std::cout << "See you later alligator!" << std::endl;
   return 0;
 }

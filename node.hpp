@@ -41,7 +41,7 @@ class Node {
    * LIST: Sends the {filename, metadata} vector
    * CREATE: Creates a file
    */
-  enum class FileOperation { SEND, DELETE, LIST, CREATE };
+  enum class FileOperation { SEND, DELETE, LIST, CREATE, UPDATE, UPDATED };
 
   // Function to initialize zmq sockets
   void initialize();
@@ -76,7 +76,9 @@ class Node {
 
   void listFiles();
 
-  void refreshFileData();
+  void refresh();
+
+  void update();
 
  private:
   NodeFileSystem fileSystem_;

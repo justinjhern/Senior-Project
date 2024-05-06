@@ -19,7 +19,7 @@ class NodeFileSystem {
     std::uintmax_t fileSize;
     std::string lastModified;
 
-    // refactor code to use this 
+    // refactor code to use this
     Json::Value toJson() const {
       Json::Value val;
       val["storedIpAddress"] = storedIpAddress;
@@ -45,7 +45,6 @@ class NodeFileSystem {
   std::vector<std::string> listFiles();
   std::map<std::string, NodeFileSystem::fileMetadata> getFilesMetadata();
   NodeFileSystem::fileMetadata getFileMetaData(std::string fileName);
-
 
  private:
   std::filesystem::path rootDir_;
