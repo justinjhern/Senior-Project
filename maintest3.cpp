@@ -33,7 +33,7 @@ std::vector<std::string> split_string(const std::string &str) {
 void readConfigFromFile(std::pair<std::string, int> &nodeIp,
                         std::vector<std::pair<std::string, int>> &targetNodes,
                         std::string &rootDir) {
-  std::string jsonName = "CONFIGtest1.json";
+  std::string jsonName = "CONFIGtest3.json";
   std::ifstream infile(jsonName);
   if (!infile.is_open()) {
     std::cerr << "Error: Could not open file: " << jsonName << std::endl;

@@ -12,6 +12,8 @@
 
 #include "node.hpp"
 
+const std::string JSONFILE = "CONFIG.json";
+
 enum class command_list { INVALID, LIST, REFRESH, READ, CREATE, DELETE };
 
 void runNodeRequestHandler(Node &node, std::atomic<bool> &serverRunning) {
@@ -33,7 +35,7 @@ std::vector<std::string> split_string(const std::string &str) {
 void readConfigFromFile(std::pair<std::string, int> &nodeIp,
                         std::vector<std::pair<std::string, int>> &targetNodes,
                         std::string &rootDir) {
-  std::string jsonName = "CONFIG.json";
+  std::string jsonName = JSONFILE;
   std::ifstream infile(jsonName);
   if (!infile.is_open()) {
     std::cerr << "Error: Could not open file: " << jsonName << std::endl;
@@ -69,19 +71,22 @@ void readConfigFromFile(std::pair<std::string, int> &nodeIp,
 void printHelp() {
   std::cout << "\
   SIMPLE DISTRIBUTED FILE STORAGE SYSTEM COMMANDS\n\
-  1) read [filename]     | Prints contents of file, if the file is not on the user's node a copy will be downloaded.\n\
-  2) create [filename]   | Creates a file on the user's node.\n\
-  3) delete [filename]   | Deletes a file from the user's node.\n\
-  4) list                | Updates files. Lists all files in the DFSS. Lists files on user's nodes first, followed by files on other active nodes.\n\
-  5) refresh             | Refreshes file storage system.\n\
-  6) exit                | Closes node, exits storage system."
+  1) read [filename]     | Prints contents of file. Only use on text documents.\n\
+  2) get [filename]      | Adds a copy of another file on a differnt node to the users node.\n\
+  3) create [filename]   | Creates a file on the user's node.\n\
+  4) delete [filename]   | Deletes a file from the user's node.\n\
+  5) update              | Notifies other nodes of changes to the user's node.\n\
+  6) list                | Updates files. Lists all files in the DFSS. Lists files on user's nodes first, followed by files on other active nodes.\n\
+  7) refresh             | Refreshes file storage system. Use this if changes are made through another filesystem.\n\
+  8) exit                | Closes node, exits storage system."
             << std::endl;
 }
 
 void createFile(Node &node, std::string fileName) { node.createFile(fileName); }
 void deleteFile(Node &node, std::string fileName) { node.deleteFile(fileName); }
 void readFile(Node &node, std::string fileName) { node.readFile(fileName); }
-void updateFile(Node &node) {node.update();}
+void getFile(Node &node, std::string fileName) { node.getFile(fileName); }
+void updateFile(Node &node) {}
 void listFiles(Node &node) { node.listFiles(); }
 void refresh(Node &node) { node.refresh(); }
 
@@ -90,6 +95,7 @@ void process(std::vector<std::string> input, Node &node) {
   if (input[0] == "create") createFile(node, input[1]);
   if (input[0] == "delete") deleteFile(node, input[1]);
   if (input[0] == "read") readFile(node, input[1]);
+    if (input[0] == "get") getFile(node, input[1]);
   if (input[0] == "refresh") refresh(node);
   if (input[0] == "list") listFiles(node);
 }
@@ -107,6 +113,11 @@ int main(int argc, char *argv[]) {
   std::string rootDir;
 
   readConfigFromFile(nodeIp, targetNodes, rootDir);
+
+  if(!std::filesystem::exists(JSONFILE)) {
+    std::cout << "Please provide a config named \""<< JSONFILE << "\"" << std::endl;
+    return -1;
+  }
 
   Node node(rootDir, targetNodes, nodeIp.first, nodeIp.second);
 

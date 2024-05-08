@@ -74,12 +74,14 @@ class Node {
   // reads file. If not on users node asks other nodes for file.
   void readFile(std::string fileName);
 
+  void getFile(std::string fileName);
+
+ 
   void listFiles();
 
   void refresh();
 
   void update();
-
  private:
   NodeFileSystem fileSystem_;
 

@@ -37,11 +37,17 @@ include_directories(
 add_executable(config_creator jsoncreator.cpp)
 add_executable(SDFSS main.cpp node_filesystem.cpp node.cpp )
 
+add_executable(test1 maintest1.cpp node_filesystem.cpp node.cpp )
+add_executable(test2 maintest2.cpp node_filesystem.cpp node.cpp )
+add_executable(test3 maintest3.cpp node_filesystem.cpp node.cpp )
+
 
 target_link_libraries(SDFSS ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
 target_link_libraries(config_creator ${JSONCPP_LIBRARIES})
-# Windows-specific settings
 
+target_link_libraries(test1 ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
+target_link_libraries(test2 ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
+target_link_libraries(test3 ${ZeroMQ_LIBRARY} fmt::fmt ${JSONCPP_LIBRARIES})
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION}) 

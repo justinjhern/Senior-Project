@@ -336,7 +336,7 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
       }
     }
     if (operationStr == "UPDATED") {
-            // convert string to json then json to vector
+      // convert string to json then json to vector
       std::string received_data(static_cast<char*>(recv_msgs[0].data()),
                                 recv_msgs[0].size());
       Json::CharReaderBuilder builder;
@@ -355,7 +355,7 @@ void Node::sendRequest(FileOperation operation, const std::string& fileName) {
       }
       // insert into other map
 
-      for(auto entry : fileMdata){
+      for (auto entry : fileMdata) {
         otherFileMData[entry.first] = entry.second;
       }
     }
@@ -403,15 +403,37 @@ void Node::deleteFile(std::string fileName) {
 void Node::readFile(std::string fileName) {
   if (!std::filesystem::exists(rootDir_ / fileName)) {
     sendRequest(Node::FileOperation::SEND, fileName);
+    std::string copyFileNameStr = "copyof" + fileName;
+    if (std::filesystem::exists(rootDir_ / copyFileNameStr)) {
+      fileSystem_.readFile(copyFileNameStr);
+      fileSystem_.deleteFile(copyFileNameStr);
+      return;
+    }
   }
-  std::string copyFileNameStr = "copyof" + fileName;
-  if (std::filesystem::exists(rootDir_ / copyFileNameStr)) {
-    fileSystem_.readFile(copyFileNameStr);
+  if (std::filesystem::exists(rootDir_ / fileName)) {
+    fileSystem_.readFile(fileName);
   } else {
     std::cerr << fileName
               << " does not exist on this node or any other online node."
               << std::endl;
   }
+}
+
+void Node::getFile(std::string fileName) {
+  if (std::filesystem::exists(rootDir_ / fileName)) {
+    std::cout
+        << "File already exists within node. To read use the \"read\" command."
+        << std::endl;
+        return;
+  } else if (!std::filesystem::exists(rootDir_ / fileName)) {
+    sendRequest(Node::FileOperation::SEND, fileName);
+    refresh();
+    return;
+  }
+
+  std::cerr << fileName
+            << " does not exist on this node or any other online node."
+            << std::endl;
 }
 
 template <typename T>
@@ -470,7 +492,7 @@ void Node::refresh() {
   }
 }
 
-void Node::update(){
+void Node::update() {
   refresh();
   sendRequest(Node::FileOperation::UPDATE, "");
 }
