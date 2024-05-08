@@ -1,0 +1,20 @@
+{
+  "node_ip" : "*",
+  "node_port" : 31415,
+  "root_directory" : "testingDir",
+  "target_nodes" : 
+  [
+    {
+      "ip" : "localhost",
+      "port" : 31416
+    },
+    {
+      "ip" : "localhost",
+      "port" : 31417
+    },
+    {
+      "ip" : "localhost",
+      "port" : 31418
+    }
+  ]
+}
