@@ -95,7 +95,7 @@ void process(std::vector<std::string> input, Node &node) {
   if (input[0] == "create") createFile(node, input[1]);
   if (input[0] == "delete") deleteFile(node, input[1]);
   if (input[0] == "read") readFile(node, input[1]);
-    if (input[0] == "get") getFile(node, input[1]);
+  if (input[0] == "get") getFile(node, input[1]);
   if (input[0] == "refresh") refresh(node);
   if (input[0] == "list") listFiles(node);
 }
@@ -147,5 +147,6 @@ int main(int argc, char *argv[]) {
   serverRunning = false;
   serverThread.join();
   std::cout << "See you later alligator!" << std::endl;
+
   return 0;
 }
